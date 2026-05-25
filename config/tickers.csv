@@ -1,0 +1,16 @@
+ticker,name,category
+AAPL,Apple Inc.,Stock
+MSFT,Microsoft Corporation,Stock
+NVDA,NVIDIA Corporation,Stock
+GOOGL,Alphabet Inc.,Stock
+AMZN,Amazon.com Inc.,Stock
+META,Meta Platforms Inc.,Stock
+TSLA,Tesla Inc.,Stock
+SPY,SPDR S&P 500 ETF,ETF
+QQQ,Invesco QQQ Trust,ETF
+DIA,SPDR Dow Jones Industrial Average ETF,ETF
+IWM,iShares Russell 2000 ETF,ETF
+XLK,Technology Select Sector SPDR Fund,Sector ETF
+XLF,Financial Select Sector SPDR Fund,Sector ETF
+XLE,Energy Select Sector SPDR Fund,Sector ETF
+XLV,Health Care Select Sector SPDR Fund,Sector ETF

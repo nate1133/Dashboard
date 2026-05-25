@@ -1,0 +1,6 @@
+indicator_code,indicator_name,source
+CPIAUCSL,Consumer Price Index,FRED
+UNRATE,Unemployment Rate,FRED
+FEDFUNDS,Federal Funds Rate,FRED
+DGS10,10-Year Treasury Yield,FRED
+GDP,Gross Domestic Product,FRED

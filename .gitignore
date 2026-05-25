@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# Logs
+logs/*.log
+
+# Data dumps
+data/*.csv
+data/*.xlsx
+data/*.parquet
+
+# OS/editor files
+.DS_Store
+.vscode/
+
+# Backups
+backups/
