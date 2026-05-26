@@ -8,6 +8,29 @@ This project collects stock market data and macroeconomic indicators, stores the
 
 The goal is to practice real-world analytics engineering and data engineering concepts using a home server environment.
 
+## Architecture
+
+```text
+Yahoo Finance                 FRED
+     │                          │
+     ▼                          ▼
+Python ETL Scripts       Python Macro Loader
+     │                          │
+     └──────────────┬───────────┘
+                    ▼
+          PostgreSQL Database
+          running in Docker
+                    │
+                    ▼
+              SQL Views
+                    │
+                    ▼
+          Streamlit Dashboard
+                    │
+                    ▼
+       Local Browser / VS Code / Analysis
+
+
 ## Current Features
 
 - Stock price extraction from Yahoo Finance using `yfinance`
@@ -49,6 +72,20 @@ The goal is to practice real-world analytics engineering and data engineering co
 - cron
 - systemd
 
+## Skills Demonstrated
+
+- Linux server setup and administration
+- Docker container management
+- PostgreSQL database design
+- Python ETL development
+- SQL views and analytics modeling
+- Cron-based automation
+- Database backup scripting
+- Streamlit dashboard development
+- Plotly data visualization
+- VS Code Remote SSH workflow
+- Git and GitHub version control
+
 
 ## Dashboard Screenshots
 
@@ -66,6 +103,18 @@ The goal is to practice real-world analytics engineering and data engineering co
 
 ### Market vs Macro
 ![Market vs Macro](assets/screenshots/market_vs_macro.png)
+
+
+## How to Run Locally
+
+Activate the Python environment:
+
+```bash
+Run manually:
+
+```bash
+source venv/bin/activate
+python3 -m streamlit run app/dashboard.py --server.address 0.0.0.0 --server.port 8501
 
 
 ## Project Structure
@@ -92,3 +141,34 @@ finance-econ-pipeline/
 ├── .gitignore
 ├── README.md
 └── requirements.txt
+
+
+---
+
+## 4. Add a “Current Status” section
+
+This makes it clear the project is complete but expandable:
+
+```markdown
+## Current Status
+
+Version 1 is complete.
+
+The project currently supports:
+
+- Automated stock market data ingestion
+- Automated macroeconomic data ingestion
+- PostgreSQL storage and SQL views
+- Streamlit dashboard with multiple tabs
+- Local network dashboard hosting
+- Scheduled cron jobs
+- PostgreSQL backup automation
+
+Future improvements may include:
+
+- Public-safe cloud deployment
+- User authentication
+- Additional asset classes
+- More advanced statistical modeling
+- Alerts for unusual market moves
+- Expanded macro/market comparison analysis
