@@ -145,9 +145,7 @@ finance-econ-pipeline/
 
 ---
 
-## 4. Add a “Current Status” section
-
-This makes it clear the project is complete but expandable:
+## 4. Current Status section
 
 ```markdown
 ## Current Status
