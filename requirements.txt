@@ -19,6 +19,7 @@ httptools==0.7.1
 idna==3.15
 itsdangerous==2.2.0
 Jinja2==3.1.6
+joblib==1.5.3
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 markdown-it-py==4.2.0
@@ -48,6 +49,7 @@ referencing==0.37.0
 requests==2.34.0
 rich==15.0.0
 rpds-py==0.30.0
+scikit-learn==1.7.2
 scipy==1.15.3
 six==1.17.0
 smmap==5.0.3
@@ -57,6 +59,7 @@ starlette==1.0.0
 statsmodels==0.14.6
 streamlit==1.57.0
 tenacity==9.1.4
+threadpoolctl==3.6.0
 toml==0.10.2
 typing_extensions==4.15.0
 tzdata==2026.2
