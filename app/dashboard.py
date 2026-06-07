@@ -161,6 +161,86 @@ def load_market_macro_monthly():
     df["month_start"] = pd.to_datetime(df["month_start"])
     return df
 
+
+@st.cache_data(ttl=600)
+def load_pipeline_health_summary():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.pipeline_health_summary
+        ORDER BY issue_rate_pct DESC;
+    """
+    return pd.read_sql(query, engine)
+
+
+@st.cache_data(ttl=600)
+def load_recent_pipeline_runs():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.recent_pipeline_runs
+        LIMIT 100;
+    """
+    df = pd.read_sql(query, engine)
+    df["run_start_time"] = pd.to_datetime(df["run_start_time"])
+    df["run_end_time"] = pd.to_datetime(df["run_end_time"])
+    return df
+
+
+@st.cache_data(ttl=600)
+def load_issue_type_summary():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.issue_type_summary;
+    """
+    return pd.read_sql(query, engine)
+
+
+@st.cache_data(ttl=600)
+def load_daily_issue_trend():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.daily_issue_trend
+        ORDER BY run_date;
+    """
+    df = pd.read_sql(query, engine)
+    df["run_date"] = pd.to_datetime(df["run_date"])
+    return df
+
+
+@st.cache_data(ttl=600)
+def load_pipeline_predictions():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.pipeline_prediction_summary
+        ORDER BY run_start_time DESC
+        LIMIT 200;
+    """
+    df = pd.read_sql(query, engine)
+    df["run_start_time"] = pd.to_datetime(df["run_start_time"])
+    return df
+
+
+@st.cache_data(ttl=600)
+def load_high_risk_pipeline_runs():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.high_risk_pipeline_runs
+        LIMIT 50;
+    """
+    df = pd.read_sql(query, engine)
+    df["run_start_time"] = pd.to_datetime(df["run_start_time"])
+    return df
+
+
+@st.cache_data(ttl=600)
+def load_latest_model_performance():
+    query = """
+        SELECT *
+        FROM pipeline_monitoring.model_performance_latest;
+    """
+    return pd.read_sql(query, engine)
+
+
+
 latest_prices = load_latest_prices()
 performance = load_performance_summary()
 stock_prices = load_stock_prices()
@@ -169,6 +249,14 @@ risk_summary = load_risk_summary()
 latest_macro = load_latest_macro_indicators()
 macro_trends = load_macro_trends()
 market_macro = load_market_macro_monthly()
+pipeline_health = load_pipeline_health_summary()
+recent_runs = load_recent_pipeline_runs()
+issue_summary = load_issue_type_summary()
+daily_issue_trend = load_daily_issue_trend()
+pipeline_predictions = load_pipeline_predictions()
+high_risk_runs = load_high_risk_pipeline_runs()
+model_performance = load_latest_model_performance()
+
 
 # -----------------------------
 # Sidebar filters
@@ -244,12 +332,13 @@ filtered_market_macro = market_macro[
 # Dashboard tabs
 # -----------------------------
 
-overview_tab, returns_tab, risk_tab, macro_tab, market_macro_tab, about_tab = st.tabs([
+overview_tab, returns_tab, risk_tab, macro_tab, market_macro_tab, pipeline_health_tab, about_tab = st.tabs([
     "Overview",
     "Returns",
     "Risk & Volatility",
     "Macro Indicators",
     "Market vs Macro",
+    "Pipeline Health",
     "About"
 ])
 
@@ -608,6 +697,196 @@ with market_macro_tab:
         use_container_width=True,
         key="market_macro_scatter"
     )
+
+
+with pipeline_health_tab:
+    st.subheader("Pipeline Health & Data Quality Prediction")
+
+    st.caption(
+        "Monitoring layer for pipeline run quality, issue detection, and model-based risk scoring."
+    )
+
+    # -----------------------------
+    # KPI cards
+    # -----------------------------
+    latest_run_time = recent_runs["run_start_time"].max()
+    total_recent_runs = len(recent_runs)
+    issue_runs = int(recent_runs["issue_flag"].sum())
+    avg_quality_score = round(recent_runs["data_quality_score"].mean(), 2)
+
+    latest_predictions_available = not pipeline_predictions.empty
+
+    if latest_predictions_available:
+        avg_issue_probability = round(
+            pipeline_predictions["issue_probability_pct"].mean(), 2
+        )
+    else:
+        avg_issue_probability = 0
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        st.metric("Latest Run", str(latest_run_time.date()))
+
+    with col2:
+        st.metric("Recent Runs", total_recent_runs)
+
+    with col3:
+        st.metric("Actual Issues", issue_runs)
+
+    with col4:
+        st.metric("Avg Quality Score", avg_quality_score)
+
+    with col5:
+        st.metric("Avg Predicted Risk", f"{avg_issue_probability}%")
+
+    # -----------------------------
+    # Pipeline health summary
+    # -----------------------------
+    st.markdown("### Pipeline Health Summary")
+
+    st.dataframe(
+        pipeline_health,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # -----------------------------
+    # Charts
+    # -----------------------------
+    st.markdown("### Issue Trends")
+
+    trend_col1, trend_col2 = st.columns(2)
+
+    with trend_col1:
+        issue_trend_fig = px.line(
+            daily_issue_trend,
+            x="run_date",
+            y="issue_rate_pct",
+            title="Daily Issue Rate %",
+            labels={
+                "run_date": "Run Date",
+                "issue_rate_pct": "Issue Rate %"
+            }
+        )
+
+        st.plotly_chart(
+            issue_trend_fig,
+            use_container_width=True,
+            key="daily_issue_rate_chart"
+        )
+
+    with trend_col2:
+        quality_trend_fig = px.line(
+            daily_issue_trend,
+            x="run_date",
+            y="avg_quality_score",
+            title="Average Data Quality Score",
+            labels={
+                "run_date": "Run Date",
+                "avg_quality_score": "Avg Quality Score"
+            }
+        )
+
+        st.plotly_chart(
+            quality_trend_fig,
+            use_container_width=True,
+            key="daily_quality_score_chart"
+        )
+
+    st.markdown("### Issue Type Breakdown")
+
+    issue_type_fig = px.bar(
+        issue_summary,
+        x="issue_type",
+        y="issue_count",
+        title="Issue Count by Type",
+        labels={
+            "issue_type": "Issue Type",
+            "issue_count": "Issue Count"
+        }
+    )
+
+    st.plotly_chart(
+        issue_type_fig,
+        use_container_width=True,
+        key="issue_type_breakdown_chart"
+    )
+
+    # -----------------------------
+    # Prediction section
+    # -----------------------------
+    st.markdown("### High-Risk Predicted Pipeline Runs")
+
+    if high_risk_runs.empty:
+        st.success("No high-risk pipeline runs found.")
+    else:
+        st.dataframe(
+            high_risk_runs,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    st.markdown("### Prediction Detail")
+
+    prediction_fig = px.histogram(
+        pipeline_predictions,
+        x="issue_probability_pct",
+        nbins=20,
+        title="Predicted Issue Probability Distribution",
+        labels={
+            "issue_probability_pct": "Predicted Issue Probability %"
+        }
+    )
+
+    st.plotly_chart(
+        prediction_fig,
+        use_container_width=True,
+        key="issue_probability_distribution"
+    )
+
+    st.dataframe(
+        pipeline_predictions.sort_values(
+            "issue_probability_pct",
+            ascending=False
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # -----------------------------
+    # Model performance
+    # -----------------------------
+    st.markdown("### Latest Model Performance")
+
+    if model_performance.empty:
+        st.warning("No model performance records found.")
+    else:
+        st.dataframe(
+            model_performance,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        model_row = model_performance.iloc[0]
+
+        perf_col1, perf_col2, perf_col3, perf_col4, perf_col5 = st.columns(5)
+
+        with perf_col1:
+            st.metric("Accuracy", round(model_row["accuracy"], 3))
+
+        with perf_col2:
+            st.metric("Precision", round(model_row["precision_score"], 3))
+
+        with perf_col3:
+            st.metric("Recall", round(model_row["recall_score"], 3))
+
+        with perf_col4:
+            st.metric("F1 Score", round(model_row["f1_score"], 3))
+
+        with perf_col5:
+            st.metric("ROC-AUC", round(model_row["roc_auc"], 3))
+
 
 
 #----------------------
