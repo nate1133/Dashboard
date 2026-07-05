@@ -1,0 +1,1 @@
+"""Trading Intelligence Platform MVP."""

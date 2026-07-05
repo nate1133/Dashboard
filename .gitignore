@@ -13,6 +13,7 @@ logs/*.log
 data/*.csv
 data/*.xlsx
 data/*.parquet
+trading_platform/data/database/*.sqlite
 
 # OS/editor files
 .DS_Store
