@@ -1,25 +1,17 @@
 from pathlib import Path
-import os
+import sys
 
 import pandas as pd
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH = PROJECT_ROOT / ".env"
 INDICATOR_CONFIG_PATH = PROJECT_ROOT / "config" / "economic_indicators.csv"
 
-load_dotenv(ENV_PATH)
+sys.path.insert(0, str(PROJECT_ROOT))
 
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+from app.db import create_db_engine
 
-engine = create_engine(
-    f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+engine = create_db_engine()
 
 
 def download_fred_indicator(indicator_code: str) -> pd.DataFrame:

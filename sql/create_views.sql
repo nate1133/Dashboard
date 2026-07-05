@@ -241,3 +241,39 @@ SELECT
     source
 FROM finance_econ.economic_indicators
 ORDER BY indicator_code, observation_date;
+
+
+-- ------------------------------------------------------------
+-- Market returns joined to monthly macro readings
+-- ------------------------------------------------------------
+
+DROP VIEW IF EXISTS finance_econ.market_macro_monthly CASCADE;
+
+CREATE VIEW finance_econ.market_macro_monthly AS
+WITH monthly_macro AS (
+    SELECT DISTINCT ON (
+        indicator_code,
+        DATE_TRUNC('month', observation_date)::date
+    )
+        indicator_code,
+        indicator_name,
+        DATE_TRUNC('month', observation_date)::date AS month_start,
+        value AS macro_value
+    FROM finance_econ.economic_indicators
+    ORDER BY
+        indicator_code,
+        DATE_TRUNC('month', observation_date)::date,
+        observation_date DESC
+)
+SELECT
+    msr.month_start,
+    msr.ticker,
+    msr.monthly_return_pct,
+    mm.indicator_code,
+    mm.indicator_name,
+    mm.macro_value
+FROM finance_econ.monthly_stock_returns msr
+JOIN monthly_macro mm
+    ON msr.month_start = mm.month_start
+WHERE msr.ticker = 'SPY'
+ORDER BY msr.month_start, mm.indicator_code;

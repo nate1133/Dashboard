@@ -1,64 +1,96 @@
-import os
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 
-# -----------------------------
-# Page setup
-# -----------------------------
+from db import create_db_engine
+
+
 st.set_page_config(
     page_title="Finance & Economics Dashboard",
     page_icon="📈",
-    layout="wide"
+    layout="wide",
 )
 
 st.title("📈 Finance & Economics Dashboard")
 st.caption("Data pipeline powered by Python, PostgreSQL, Docker, and Streamlit")
 
-# -----------------------------
-# Database connection
-# -----------------------------
-load_dotenv()
 
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+@st.cache_resource(show_spinner=False)
+def get_engine():
+    return create_db_engine()
 
-engine = create_engine(
-    f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
 
-# -----------------------------
-# Load data
-# -----------------------------
-@st.cache_data(ttl=600)
-def load_latest_prices():
-    query = """
+@st.cache_data(ttl=600, show_spinner=False)
+def read_table(query: str, date_columns: tuple[str, ...] = ()) -> pd.DataFrame:
+    df = pd.read_sql(query, get_engine())
+
+    for column in date_columns:
+        if column in df.columns:
+            df[column] = pd.to_datetime(df[column], errors="coerce")
+
+    return df
+
+
+def load_query(name: str, query: str, date_columns: tuple[str, ...] = ()) -> pd.DataFrame:
+    try:
+        return read_table(query, date_columns)
+    except SQLAlchemyError as error:
+        st.warning(f"{name} could not be loaded: {error.__class__.__name__}")
+        return pd.DataFrame()
+
+
+def empty_frame_message(label: str) -> None:
+    st.info(f"No {label} data is available yet.")
+
+
+def safe_sort(df: pd.DataFrame, columns, ascending=True) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    sort_columns = [columns] if isinstance(columns, str) else list(columns)
+    existing_columns = [column for column in sort_columns if column in df.columns]
+
+    if not existing_columns:
+        return df
+
+    if isinstance(ascending, list):
+        ascending = ascending[: len(existing_columns)]
+
+    return df.sort_values(existing_columns, ascending=ascending)
+
+
+try:
+    get_engine()
+except Exception as error:
+    st.error("The dashboard could not connect to PostgreSQL.")
+    st.exception(error)
+    st.stop()
+
+
+latest_prices = load_query(
+    "latest stock prices",
+    """
         SELECT *
         FROM finance_econ.latest_stock_prices
         ORDER BY ticker;
+    """,
+    ("price_date", "loaded_at"),
+)
+
+performance = load_query(
+    "performance summary",
     """
-    return pd.read_sql(query, engine)
-
-
-@st.cache_data(ttl=600)
-def load_performance_summary():
-    query = """
         SELECT *
         FROM finance_econ.stock_performance_summary
         ORDER BY total_return_pct DESC;
+    """,
+    ("first_date", "last_date"),
+)
+
+stock_prices = load_query(
+    "stock prices",
     """
-    return pd.read_sql(query, engine)
-
-
-@st.cache_data(ttl=600)
-def load_stock_prices():
-    query = """
         SELECT
             sp.ticker,
             tm.name,
@@ -70,15 +102,13 @@ def load_stock_prices():
         LEFT JOIN finance_econ.ticker_metadata tm
             ON sp.ticker = tm.ticker
         ORDER BY sp.ticker, sp.price_date;
+    """,
+    ("price_date",),
+)
+
+monthly_returns = load_query(
+    "monthly returns",
     """
-    df = pd.read_sql(query, engine)
-    df["price_date"] = pd.to_datetime(df["price_date"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_monthly_returns():
-    query = """
         SELECT
             ticker,
             name,
@@ -87,15 +117,13 @@ def load_monthly_returns():
             monthly_return_pct
         FROM finance_econ.monthly_stock_returns
         ORDER BY month_start, ticker;
+    """,
+    ("month_start",),
+)
+
+risk_summary = load_query(
+    "risk summary",
     """
-    df = pd.read_sql(query, engine)
-    df["month_start"] = pd.to_datetime(df["month_start"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_risk_summary():
-    query = """
         SELECT
             ticker,
             name,
@@ -107,12 +135,12 @@ def load_risk_summary():
             best_daily_return_pct
         FROM finance_econ.stock_risk_summary
         ORDER BY daily_volatility_pct DESC;
-    """
-    return pd.read_sql(query, engine)
+    """,
+)
 
-@st.cache_data(ttl=600)
-def load_latest_macro_indicators():
-    query = """
+latest_macro = load_query(
+    "latest macro indicators",
+    """
         SELECT
             indicator_code,
             indicator_name,
@@ -122,15 +150,13 @@ def load_latest_macro_indicators():
             loaded_at
         FROM finance_econ.latest_economic_indicators
         ORDER BY indicator_code;
+    """,
+    ("observation_date", "loaded_at"),
+)
+
+macro_trends = load_query(
+    "macro trends",
     """
-    df = pd.read_sql(query, engine)
-    df["observation_date"] = pd.to_datetime(df["observation_date"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_macro_trends():
-    query = """
         SELECT
             indicator_code,
             indicator_name,
@@ -139,14 +165,13 @@ def load_macro_trends():
             source
         FROM finance_econ.macro_trends
         ORDER BY indicator_code, observation_date;
-    """
-    df = pd.read_sql(query, engine)
-    df["observation_date"] = pd.to_datetime(df["observation_date"])
-    return df
+    """,
+    ("observation_date",),
+)
 
-@st.cache_data(ttl=600)
-def load_market_macro_monthly():
-    query = """
+market_macro = load_query(
+    "market vs macro",
+    """
         SELECT
             month_start,
             ticker,
@@ -156,438 +181,387 @@ def load_market_macro_monthly():
             macro_value
         FROM finance_econ.market_macro_monthly
         ORDER BY month_start, indicator_code;
+    """,
+    ("month_start",),
+)
+
+pipeline_health = load_query(
+    "pipeline health summary",
     """
-    df = pd.read_sql(query, engine)
-    df["month_start"] = pd.to_datetime(df["month_start"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_pipeline_health_summary():
-    query = """
         SELECT *
         FROM pipeline_monitoring.pipeline_health_summary
         ORDER BY issue_rate_pct DESC;
+    """,
+)
+
+recent_runs = load_query(
+    "recent pipeline runs",
     """
-    return pd.read_sql(query, engine)
-
-
-@st.cache_data(ttl=600)
-def load_recent_pipeline_runs():
-    query = """
         SELECT *
         FROM pipeline_monitoring.recent_pipeline_runs
         LIMIT 100;
+    """,
+    ("run_start_time", "run_end_time"),
+)
+
+issue_summary = load_query(
+    "issue type summary",
     """
-    df = pd.read_sql(query, engine)
-    df["run_start_time"] = pd.to_datetime(df["run_start_time"])
-    df["run_end_time"] = pd.to_datetime(df["run_end_time"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_issue_type_summary():
-    query = """
         SELECT *
         FROM pipeline_monitoring.issue_type_summary;
+    """,
+)
+
+daily_issue_trend = load_query(
+    "daily issue trend",
     """
-    return pd.read_sql(query, engine)
-
-
-@st.cache_data(ttl=600)
-def load_daily_issue_trend():
-    query = """
         SELECT *
         FROM pipeline_monitoring.daily_issue_trend
         ORDER BY run_date;
+    """,
+    ("run_date",),
+)
+
+pipeline_predictions = load_query(
+    "pipeline predictions",
     """
-    df = pd.read_sql(query, engine)
-    df["run_date"] = pd.to_datetime(df["run_date"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_pipeline_predictions():
-    query = """
         SELECT *
         FROM pipeline_monitoring.pipeline_prediction_summary
         ORDER BY run_start_time DESC
         LIMIT 200;
+    """,
+    ("run_start_time", "prediction_time"),
+)
+
+high_risk_runs = load_query(
+    "high-risk pipeline runs",
     """
-    df = pd.read_sql(query, engine)
-    df["run_start_time"] = pd.to_datetime(df["run_start_time"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_high_risk_pipeline_runs():
-    query = """
         SELECT *
         FROM pipeline_monitoring.high_risk_pipeline_runs
         LIMIT 50;
+    """,
+    ("run_start_time", "prediction_time"),
+)
+
+model_performance = load_query(
+    "latest model performance",
     """
-    df = pd.read_sql(query, engine)
-    df["run_start_time"] = pd.to_datetime(df["run_start_time"])
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_latest_model_performance():
-    query = """
         SELECT *
         FROM pipeline_monitoring.model_performance_latest;
-    """
-    return pd.read_sql(query, engine)
+    """,
+    ("training_date",),
+)
 
 
-
-latest_prices = load_latest_prices()
-performance = load_performance_summary()
-stock_prices = load_stock_prices()
-monthly_returns = load_monthly_returns()
-risk_summary = load_risk_summary()
-latest_macro = load_latest_macro_indicators()
-macro_trends = load_macro_trends()
-market_macro = load_market_macro_monthly()
-pipeline_health = load_pipeline_health_summary()
-recent_runs = load_recent_pipeline_runs()
-issue_summary = load_issue_type_summary()
-daily_issue_trend = load_daily_issue_trend()
-pipeline_predictions = load_pipeline_predictions()
-high_risk_runs = load_high_risk_pipeline_runs()
-model_performance = load_latest_model_performance()
-
-
-# -----------------------------
-# Sidebar filters
-# -----------------------------
 st.sidebar.header("Filters")
 
-categories = sorted(stock_prices["category"].dropna().unique())
+categories = (
+    sorted(stock_prices["category"].dropna().unique())
+    if "category" in stock_prices.columns
+    else []
+)
 
 selected_categories = st.sidebar.multiselect(
     "Select categories",
     options=categories,
-    default=categories
+    default=categories,
 )
 
-category_filtered = stock_prices[
-    stock_prices["category"].isin(selected_categories)
-]
+category_filtered = (
+    stock_prices[stock_prices["category"].isin(selected_categories)]
+    if selected_categories and "category" in stock_prices.columns
+    else stock_prices.copy()
+)
 
-tickers = sorted(category_filtered["ticker"].unique())
+tickers = (
+    sorted(category_filtered["ticker"].dropna().unique())
+    if "ticker" in category_filtered.columns
+    else []
+)
 
 selected_tickers = st.sidebar.multiselect(
     "Select tickers",
     options=tickers,
-    default=tickers
+    default=tickers,
 )
 
-filtered_prices = category_filtered[
-    category_filtered["ticker"].isin(selected_tickers)
-]
+filtered_prices = (
+    category_filtered[category_filtered["ticker"].isin(selected_tickers)]
+    if selected_tickers and "ticker" in category_filtered.columns
+    else category_filtered.iloc[0:0]
+)
 
-filtered_monthly_returns = monthly_returns[
-    (monthly_returns["category"].isin(selected_categories)) &
-    (monthly_returns["ticker"].isin(selected_tickers))
-]
+filtered_monthly_returns = monthly_returns.copy()
+if selected_categories and "category" in filtered_monthly_returns.columns:
+    filtered_monthly_returns = filtered_monthly_returns[
+        filtered_monthly_returns["category"].isin(selected_categories)
+    ]
+if selected_tickers and "ticker" in filtered_monthly_returns.columns:
+    filtered_monthly_returns = filtered_monthly_returns[
+        filtered_monthly_returns["ticker"].isin(selected_tickers)
+    ]
 
-filtered_risk_summary = risk_summary[
-    (risk_summary["category"].isin(selected_categories)) &
-    (risk_summary["ticker"].isin(selected_tickers))
-]
+filtered_risk_summary = risk_summary.copy()
+if selected_categories and "category" in filtered_risk_summary.columns:
+    filtered_risk_summary = filtered_risk_summary[
+        filtered_risk_summary["category"].isin(selected_categories)
+    ]
+if selected_tickers and "ticker" in filtered_risk_summary.columns:
+    filtered_risk_summary = filtered_risk_summary[
+        filtered_risk_summary["ticker"].isin(selected_tickers)
+    ]
 
 st.sidebar.divider()
 
-macro_indicators = sorted(macro_trends["indicator_name"].dropna().unique())
+macro_indicators = (
+    sorted(macro_trends["indicator_name"].dropna().unique())
+    if "indicator_name" in macro_trends.columns
+    else []
+)
 
 selected_macro_indicators = st.sidebar.multiselect(
     "Select macro indicators",
     options=macro_indicators,
-    default=macro_indicators
+    default=macro_indicators,
 )
 
-filtered_macro_trends = macro_trends[
-    macro_trends["indicator_name"].isin(selected_macro_indicators)
-]
-
-filtered_latest_macro = latest_macro[
-    latest_macro["indicator_name"].isin(selected_macro_indicators)
-]
-
-market_macro_indicators = sorted(
-    market_macro["indicator_name"].dropna().unique()
+filtered_macro_trends = (
+    macro_trends[macro_trends["indicator_name"].isin(selected_macro_indicators)]
+    if selected_macro_indicators and "indicator_name" in macro_trends.columns
+    else macro_trends.iloc[0:0]
 )
 
-selected_market_macro_indicator = st.sidebar.selectbox(
-    "Market vs Macro indicator",
-    options=market_macro_indicators
+filtered_latest_macro = (
+    latest_macro[latest_macro["indicator_name"].isin(selected_macro_indicators)]
+    if selected_macro_indicators and "indicator_name" in latest_macro.columns
+    else latest_macro.iloc[0:0]
 )
 
-filtered_market_macro = market_macro[
-    market_macro["indicator_name"] == selected_market_macro_indicator
-]
+market_macro_indicators = (
+    sorted(market_macro["indicator_name"].dropna().unique())
+    if "indicator_name" in market_macro.columns
+    else []
+)
 
-# -----------------------------
-# Dashboard tabs
-# -----------------------------
+selected_market_macro_indicator = None
+if market_macro_indicators:
+    selected_market_macro_indicator = st.sidebar.selectbox(
+        "Market vs Macro indicator",
+        options=market_macro_indicators,
+    )
 
-overview_tab, returns_tab, risk_tab, macro_tab, market_macro_tab, pipeline_health_tab, about_tab = st.tabs([
-    "Overview",
-    "Returns",
-    "Risk & Volatility",
-    "Macro Indicators",
-    "Market vs Macro",
-    "Pipeline Health",
-    "About"
-])
+filtered_market_macro = (
+    market_macro[market_macro["indicator_name"] == selected_market_macro_indicator]
+    if selected_market_macro_indicator and "indicator_name" in market_macro.columns
+    else market_macro.iloc[0:0]
+)
 
 
-# -----------------------------
-# KPI cards
-# -----------------------------
+overview_tab, returns_tab, risk_tab, macro_tab, market_macro_tab, pipeline_health_tab, about_tab = st.tabs(
+    [
+        "Overview",
+        "Returns",
+        "Risk & Volatility",
+        "Macro Indicators",
+        "Market vs Macro",
+        "Pipeline Health",
+        "About",
+    ]
+)
+
+
 with overview_tab:
     st.subheader("Market Overview")
 
     col1, col2, col3, col4 = st.columns(4)
 
-    latest_date = latest_prices["price_date"].max()
-    best_row = performance.sort_values("total_return_pct", ascending=False).iloc[0]
-    worst_row = performance.sort_values("total_return_pct", ascending=True).iloc[0]
+    latest_date = latest_prices["price_date"].max() if "price_date" in latest_prices else None
+    best_row = performance.iloc[0] if not performance.empty else None
+    worst_row = (
+        performance.sort_values("total_return_pct", ascending=True).iloc[0]
+        if "total_return_pct" in performance and not performance.empty
+        else None
+    )
 
     with col1:
-        st.metric("Latest Data Date", str(latest_date))
+        st.metric("Latest Data Date", str(latest_date.date()) if pd.notna(latest_date) else "N/A")
 
     with col2:
         st.metric("Tickers Tracked", len(tickers))
 
     with col3:
-        st.metric(
-            "Best Performer",
-            best_row["ticker"],
-            f"{best_row['total_return_pct']}%"
-        )
+        if best_row is not None:
+            st.metric("Best Performer", best_row["ticker"], f"{best_row['total_return_pct']}%")
+        else:
+            st.metric("Best Performer", "N/A")
 
     with col4:
-        st.metric(
-            "Worst Performer",
-            worst_row["ticker"],
-            f"{worst_row['total_return_pct']}%"
-        )
+        if worst_row is not None:
+            st.metric("Worst Performer", worst_row["ticker"], f"{worst_row['total_return_pct']}%")
+        else:
+            st.metric("Worst Performer", "N/A")
 
     st.subheader("Latest Stock Prices")
-    st.dataframe(
-        latest_prices,
-        use_container_width=True,
-        hide_index=True
-    )
+    if latest_prices.empty:
+        empty_frame_message("latest stock price")
+    else:
+        st.dataframe(latest_prices, width="stretch", hide_index=True)
 
     st.subheader("Performance Summary")
-    st.dataframe(
-        performance,
-        use_container_width=True,
-        hide_index=True
-    )
+    if performance.empty:
+        empty_frame_message("performance summary")
+    else:
+        st.dataframe(performance, width="stretch", hide_index=True)
 
     st.subheader("Adjusted Close Price Over Time")
-
-    fig = px.line(
-        filtered_prices,
-        x="price_date",
-        y="adjusted_close",
-        color="ticker",
-        hover_name="name",
-        title="Adjusted Close by Ticker",
-        labels={
-            "price_date": "Date",
-            "adjusted_close": "Adjusted Close",
-            "ticker": "Ticker"
-        }
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------------
-# Latest prices table
-# -----------------------------
-st.subheader("Latest Stock Prices")
-st.dataframe(
-    latest_prices,
-    use_container_width=True,
-    hide_index=True
-)
-
-# -----------------------------
-# Performance table
-# -----------------------------
-st.subheader("Performance Summary")
-
-st.dataframe(
-    performance,
-    use_container_width=True,
-    hide_index=True
-)
-
-# -----------------------------
-# Price chart
-# -----------------------------
-st.subheader("Adjusted Close Price Over Time")
-
-fig = px.line(
-    filtered_prices,
-    x="price_date",
-    y="adjusted_close",
-    color="ticker",
-    hover_name="name",
-    title="Adjusted Close by Ticker",
-    labels={
-        "price_date": "Date",
-        "adjusted_close": "Adjusted Close",
-        "ticker": "Ticker"
-    }
-)
-
-st.plotly_chart(fig, use_container_width=True, key="adjusted_close_chart")
-
-# -----------------------------
-# Risk and volatility section
-# -----------------------------
-with risk_tab:
-    st.subheader("Risk & Volatility")
-
-    risk_col1, risk_col2 = st.columns(2)
-
-    with risk_col1:
-        vol_fig = px.bar(
-            filtered_risk_summary.sort_values("daily_volatility_pct", ascending=False),
-            x="ticker",
-            y="daily_volatility_pct",
-            color="category",
+    if filtered_prices.empty:
+        empty_frame_message("filtered stock price")
+    else:
+        fig = px.line(
+            filtered_prices,
+            x="price_date",
+            y="adjusted_close",
+            color="ticker",
             hover_name="name",
-            title="Daily Volatility by Ticker",
+            title="Adjusted Close by Ticker",
             labels={
+                "price_date": "Date",
+                "adjusted_close": "Adjusted Close",
                 "ticker": "Ticker",
-                "daily_volatility_pct": "Daily Volatility %",
-                "category": "Category"
-            }
+            },
         )
-        st.plotly_chart(vol_fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
-    with risk_col2:
-        avg_return_fig = px.bar(
-            filtered_risk_summary.sort_values("avg_daily_return_pct", ascending=False),
-            x="ticker",
-            y="avg_daily_return_pct",
-            color="category",
-            hover_name="name",
-            title="Average Daily Return by Ticker",
-            labels={
-                "ticker": "Ticker",
-                "avg_daily_return_pct": "Average Daily Return %",
-                "category": "Category"
-            }
-        )
-        st.plotly_chart(avg_return_fig, use_container_width=True, key="volatility_chart")
 
-    st.dataframe(
-        filtered_risk_summary.sort_values("daily_volatility_pct", ascending=False),
-        use_container_width=True,
-        hide_index=True
-    )
-
-# -----------------------------
-# Monthly returns chart
-# -----------------------------
 with returns_tab:
     st.subheader("Monthly Returns")
 
-    monthly_fig = px.bar(
-        filtered_monthly_returns,
-        x="month_start",
-        y="monthly_return_pct",
-        color="ticker",
-        barmode="group",
-        hover_name="name",
-        title="Monthly Return % by Ticker",
-        labels={
-            "month_start": "Month",
-            "monthly_return_pct": "Monthly Return %",
-            "ticker": "Ticker"
-        }
-    )
+    if filtered_monthly_returns.empty:
+        empty_frame_message("monthly return")
+    else:
+        monthly_fig = px.bar(
+            filtered_monthly_returns,
+            x="month_start",
+            y="monthly_return_pct",
+            color="ticker",
+            barmode="group",
+            hover_name="name",
+            title="Monthly Return % by Ticker",
+            labels={
+                "month_start": "Month",
+                "monthly_return_pct": "Monthly Return %",
+                "ticker": "Ticker",
+            },
+        )
 
-    st.plotly_chart(monthly_fig, use_container_width=True, key="monthly_returns_chart")
+        st.plotly_chart(monthly_fig, width="stretch", key="monthly_returns_chart")
+        st.dataframe(
+            safe_sort(filtered_monthly_returns, ["month_start", "monthly_return_pct"], [False, False]),
+            width="stretch",
+            hide_index=True,
+        )
 
-    st.dataframe(
-        filtered_monthly_returns.sort_values(
-            ["month_start", "monthly_return_pct"],
-            ascending=[False, False]
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-#---------------------------
-#Volume chart
-#---------------------------
     st.subheader("Trading Volume")
+    if filtered_prices.empty:
+        empty_frame_message("trading volume")
+    else:
+        volume_fig = px.bar(
+            filtered_prices,
+            x="price_date",
+            y="volume",
+            color="ticker",
+            hover_name="name",
+            title="Trading Volume by Ticker",
+            labels={
+                "price_date": "Date",
+                "volume": "Volume",
+                "ticker": "Ticker",
+            },
+        )
 
-    volume_fig = px.bar(
-        filtered_prices,
-        x="price_date",
-        y="volume",
-        color="ticker",
-        hover_name="name",
-        title="Trading Volume by Ticker",
-        labels={
-            "price_date": "Date",
-            "volume": "Volume",
-            "ticker": "Ticker"
-        }
-    )
+        st.plotly_chart(volume_fig, width="stretch", key="volume_chart")
 
-    st.plotly_chart(volume_fig, use_container_width=True, key="volume_chart")
 
-#-------------------------
-#Macroeconomic tab
-#------------------------
+with risk_tab:
+    st.subheader("Risk & Volatility")
+
+    if filtered_risk_summary.empty:
+        empty_frame_message("risk summary")
+    else:
+        risk_col1, risk_col2 = st.columns(2)
+
+        with risk_col1:
+            vol_fig = px.bar(
+                safe_sort(filtered_risk_summary, "daily_volatility_pct", False),
+                x="ticker",
+                y="daily_volatility_pct",
+                color="category",
+                hover_name="name",
+                title="Daily Volatility by Ticker",
+                labels={
+                    "ticker": "Ticker",
+                    "daily_volatility_pct": "Daily Volatility %",
+                    "category": "Category",
+                },
+            )
+            st.plotly_chart(vol_fig, width="stretch")
+
+        with risk_col2:
+            avg_return_fig = px.bar(
+                safe_sort(filtered_risk_summary, "avg_daily_return_pct", False),
+                x="ticker",
+                y="avg_daily_return_pct",
+                color="category",
+                hover_name="name",
+                title="Average Daily Return by Ticker",
+                labels={
+                    "ticker": "Ticker",
+                    "avg_daily_return_pct": "Average Daily Return %",
+                    "category": "Category",
+                },
+            )
+            st.plotly_chart(avg_return_fig, width="stretch", key="volatility_chart")
+
+        st.dataframe(
+            safe_sort(filtered_risk_summary, "daily_volatility_pct", False),
+            width="stretch",
+            hide_index=True,
+        )
+
 
 with macro_tab:
     st.subheader("Macro Indicators")
-
     st.caption("Economic data loaded from FRED into PostgreSQL.")
 
     st.markdown("### Latest Macro Readings")
-
-    st.dataframe(
-        filtered_latest_macro.sort_values("indicator_code"),
-        use_container_width=True,
-        hide_index=True
-    )
+    if filtered_latest_macro.empty:
+        empty_frame_message("latest macro indicator")
+    else:
+        st.dataframe(
+            safe_sort(filtered_latest_macro, "indicator_code"),
+            width="stretch",
+            hide_index=True,
+        )
 
     st.markdown("### Macro Trends Over Time")
-
-    macro_fig = px.line(
-        filtered_macro_trends,
-        x="observation_date",
-        y="value",
-        color="indicator_name",
-        title="Economic Indicators Over Time",
-        labels={
-            "observation_date": "Date",
-            "value": "Value",
-            "indicator_name": "Indicator"
-        }
-    )
-
-    st.plotly_chart(
-        macro_fig,
-        use_container_width=True,
-        key="macro_trends_chart"
-    )
+    if filtered_macro_trends.empty:
+        empty_frame_message("macro trend")
+    else:
+        macro_fig = px.line(
+            filtered_macro_trends,
+            x="observation_date",
+            y="value",
+            color="indicator_name",
+            title="Economic Indicators Over Time",
+            labels={
+                "observation_date": "Date",
+                "value": "Value",
+                "indicator_name": "Indicator",
+            },
+        )
+        st.plotly_chart(macro_fig, width="stretch", key="macro_trends_chart")
 
     st.markdown("### Individual Indicator Views")
-
     for indicator in selected_macro_indicators:
         indicator_df = filtered_macro_trends[
             filtered_macro_trends["indicator_name"] == indicator
@@ -604,272 +578,228 @@ with macro_tab:
                 title=indicator,
                 labels={
                     "observation_date": "Date",
-                    "value": "Value"
-                }
+                    "value": "Value",
+                },
             )
 
             st.plotly_chart(
                 indicator_fig,
-                use_container_width=True,
-                key=f"macro_chart_{indicator}"
+                width="stretch",
+                key=f"macro_chart_{indicator}",
             )
 
             st.dataframe(
-                indicator_df.sort_values("observation_date", ascending=False).head(20),
-                use_container_width=True,
-                hide_index=True
+                safe_sort(indicator_df, "observation_date", False).head(20),
+                width="stretch",
+                hide_index=True,
             )
 
 
 with market_macro_tab:
     st.subheader("Market vs Macro")
+    st.caption("Compare SPY monthly returns against selected macroeconomic indicators.")
 
-    st.caption(
-        "Compare SPY monthly returns against selected macroeconomic indicators."
-    )
+    if filtered_market_macro.empty or not selected_market_macro_indicator:
+        empty_frame_message("market and macro comparison")
+    else:
+        st.markdown(f"### SPY Monthly Returns vs {selected_market_macro_indicator}")
 
-    st.markdown(f"### SPY Monthly Returns vs {selected_market_macro_indicator}")
+        comparison_col1, comparison_col2 = st.columns(2)
 
-    comparison_col1, comparison_col2 = st.columns(2)
+        with comparison_col1:
+            spy_return_fig = px.bar(
+                filtered_market_macro,
+                x="month_start",
+                y="monthly_return_pct",
+                title="SPY Monthly Return %",
+                labels={
+                    "month_start": "Month",
+                    "monthly_return_pct": "SPY Monthly Return %",
+                },
+            )
 
-    with comparison_col1:
-        spy_return_fig = px.bar(
+            st.plotly_chart(
+                spy_return_fig,
+                width="stretch",
+                key="spy_monthly_return_macro_compare",
+            )
+
+        with comparison_col2:
+            macro_compare_fig = px.line(
+                filtered_market_macro,
+                x="month_start",
+                y="macro_value",
+                title=selected_market_macro_indicator,
+                markers=True,
+                labels={
+                    "month_start": "Month",
+                    "macro_value": selected_market_macro_indicator,
+                },
+            )
+
+            st.plotly_chart(
+                macro_compare_fig,
+                width="stretch",
+                key="macro_compare_chart",
+            )
+
+        st.markdown("### Comparison Table")
+        st.dataframe(
+            safe_sort(filtered_market_macro, "month_start", False),
+            width="stretch",
+            hide_index=True,
+        )
+
+        st.markdown("### Simple Relationship View")
+        scatter_fig = px.scatter(
             filtered_market_macro,
-            x="month_start",
+            x="macro_value",
             y="monthly_return_pct",
-            title="SPY Monthly Return %",
+            trendline="ols",
+            hover_data=["month_start"],
+            title=f"SPY Monthly Return % vs {selected_market_macro_indicator}",
             labels={
-                "month_start": "Month",
-                "monthly_return_pct": "SPY Monthly Return %"
-            }
+                "macro_value": selected_market_macro_indicator,
+                "monthly_return_pct": "SPY Monthly Return %",
+            },
         )
 
-        st.plotly_chart(
-            spy_return_fig,
-            use_container_width=True,
-            key="spy_monthly_return_macro_compare"
-        )
-
-    with comparison_col2:
-        macro_compare_fig = px.line(
-            filtered_market_macro,
-            x="month_start",
-            y="macro_value",
-            title=selected_market_macro_indicator,
-            markers=True,
-            labels={
-                "month_start": "Month",
-                "macro_value": selected_market_macro_indicator
-            }
-        )
-
-        st.plotly_chart(
-            macro_compare_fig,
-            use_container_width=True,
-            key="macro_compare_chart"
-        )
-
-    st.markdown("### Comparison Table")
-
-    st.dataframe(
-        filtered_market_macro.sort_values("month_start", ascending=False),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.markdown("### Simple Relationship View")
-
-    scatter_fig = px.scatter(
-        filtered_market_macro,
-        x="macro_value",
-        y="monthly_return_pct",
-        trendline="ols",
-        hover_data=["month_start"],
-        title=f"SPY Monthly Return % vs {selected_market_macro_indicator}",
-        labels={
-            "macro_value": selected_market_macro_indicator,
-            "monthly_return_pct": "SPY Monthly Return %"
-        }
-    )
-
-    st.plotly_chart(
-        scatter_fig,
-        use_container_width=True,
-        key="market_macro_scatter"
-    )
+        st.plotly_chart(scatter_fig, width="stretch", key="market_macro_scatter")
 
 
 with pipeline_health_tab:
     st.subheader("Pipeline Health & Data Quality Prediction")
-
     st.caption(
         "Monitoring layer for pipeline run quality, issue detection, and model-based risk scoring."
     )
 
-    # -----------------------------
-    # KPI cards
-    # -----------------------------
-    latest_run_time = recent_runs["run_start_time"].max()
-    total_recent_runs = len(recent_runs)
-    issue_runs = int(recent_runs["issue_flag"].sum())
-    avg_quality_score = round(recent_runs["data_quality_score"].mean(), 2)
-
-    latest_predictions_available = not pipeline_predictions.empty
-
-    if latest_predictions_available:
-        avg_issue_probability = round(
-            pipeline_predictions["issue_probability_pct"].mean(), 2
-        )
+    if recent_runs.empty:
+        empty_frame_message("recent pipeline run")
     else:
-        avg_issue_probability = 0
+        latest_run_time = recent_runs["run_start_time"].max()
+        total_recent_runs = len(recent_runs)
+        issue_runs = int(recent_runs["issue_flag"].fillna(0).sum())
+        avg_quality_score = round(recent_runs["data_quality_score"].mean(), 2)
+        avg_quality_score = "N/A" if pd.isna(avg_quality_score) else avg_quality_score
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+        latest_predictions_available = (
+            not pipeline_predictions.empty
+            and "issue_probability_pct" in pipeline_predictions.columns
+        )
+        avg_issue_probability = (
+            round(pipeline_predictions["issue_probability_pct"].mean(), 2)
+            if latest_predictions_available
+            else 0
+        )
 
-    with col1:
-        st.metric("Latest Run", str(latest_run_time.date()))
+        col1, col2, col3, col4, col5 = st.columns(5)
 
-    with col2:
-        st.metric("Recent Runs", total_recent_runs)
+        with col1:
+            latest_run_value = (
+                str(latest_run_time.date()) if pd.notna(latest_run_time) else "N/A"
+            )
+            st.metric("Latest Run", latest_run_value)
 
-    with col3:
-        st.metric("Actual Issues", issue_runs)
+        with col2:
+            st.metric("Recent Runs", total_recent_runs)
 
-    with col4:
-        st.metric("Avg Quality Score", avg_quality_score)
+        with col3:
+            st.metric("Actual Issues", issue_runs)
 
-    with col5:
-        st.metric("Avg Predicted Risk", f"{avg_issue_probability}%")
+        with col4:
+            st.metric("Avg Quality Score", avg_quality_score)
 
-    # -----------------------------
-    # Pipeline health summary
-    # -----------------------------
+        with col5:
+            st.metric("Avg Predicted Risk", f"{avg_issue_probability}%")
+
     st.markdown("### Pipeline Health Summary")
+    if pipeline_health.empty:
+        empty_frame_message("pipeline health summary")
+    else:
+        st.dataframe(pipeline_health, width="stretch", hide_index=True)
 
-    st.dataframe(
-        pipeline_health,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # -----------------------------
-    # Charts
-    # -----------------------------
     st.markdown("### Issue Trends")
+    if daily_issue_trend.empty:
+        empty_frame_message("daily issue trend")
+    else:
+        trend_col1, trend_col2 = st.columns(2)
 
-    trend_col1, trend_col2 = st.columns(2)
+        with trend_col1:
+            issue_trend_fig = px.line(
+                daily_issue_trend,
+                x="run_date",
+                y="issue_rate_pct",
+                title="Daily Issue Rate %",
+                labels={
+                    "run_date": "Run Date",
+                    "issue_rate_pct": "Issue Rate %",
+                },
+            )
+            st.plotly_chart(issue_trend_fig, width="stretch", key="daily_issue_rate_chart")
 
-    with trend_col1:
-        issue_trend_fig = px.line(
-            daily_issue_trend,
-            x="run_date",
-            y="issue_rate_pct",
-            title="Daily Issue Rate %",
-            labels={
-                "run_date": "Run Date",
-                "issue_rate_pct": "Issue Rate %"
-            }
-        )
-
-        st.plotly_chart(
-            issue_trend_fig,
-            use_container_width=True,
-            key="daily_issue_rate_chart"
-        )
-
-    with trend_col2:
-        quality_trend_fig = px.line(
-            daily_issue_trend,
-            x="run_date",
-            y="avg_quality_score",
-            title="Average Data Quality Score",
-            labels={
-                "run_date": "Run Date",
-                "avg_quality_score": "Avg Quality Score"
-            }
-        )
-
-        st.plotly_chart(
-            quality_trend_fig,
-            use_container_width=True,
-            key="daily_quality_score_chart"
-        )
+        with trend_col2:
+            quality_trend_fig = px.line(
+                daily_issue_trend,
+                x="run_date",
+                y="avg_quality_score",
+                title="Average Data Quality Score",
+                labels={
+                    "run_date": "Run Date",
+                    "avg_quality_score": "Avg Quality Score",
+                },
+            )
+            st.plotly_chart(quality_trend_fig, width="stretch", key="daily_quality_score_chart")
 
     st.markdown("### Issue Type Breakdown")
+    if issue_summary.empty:
+        empty_frame_message("issue type")
+    else:
+        issue_type_fig = px.bar(
+            issue_summary,
+            x="issue_type",
+            y="issue_count",
+            title="Issue Count by Type",
+            labels={
+                "issue_type": "Issue Type",
+                "issue_count": "Issue Count",
+            },
+        )
+        st.plotly_chart(issue_type_fig, width="stretch", key="issue_type_breakdown_chart")
 
-    issue_type_fig = px.bar(
-        issue_summary,
-        x="issue_type",
-        y="issue_count",
-        title="Issue Count by Type",
-        labels={
-            "issue_type": "Issue Type",
-            "issue_count": "Issue Count"
-        }
-    )
-
-    st.plotly_chart(
-        issue_type_fig,
-        use_container_width=True,
-        key="issue_type_breakdown_chart"
-    )
-
-    # -----------------------------
-    # Prediction section
-    # -----------------------------
     st.markdown("### High-Risk Predicted Pipeline Runs")
-
     if high_risk_runs.empty:
         st.success("No high-risk pipeline runs found.")
     else:
-        st.dataframe(
-            high_risk_runs,
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(high_risk_runs, width="stretch", hide_index=True)
 
     st.markdown("### Prediction Detail")
+    if pipeline_predictions.empty:
+        empty_frame_message("pipeline prediction")
+    else:
+        prediction_fig = px.histogram(
+            pipeline_predictions,
+            x="issue_probability_pct",
+            nbins=20,
+            title="Predicted Issue Probability Distribution",
+            labels={
+                "issue_probability_pct": "Predicted Issue Probability %",
+            },
+        )
+        st.plotly_chart(prediction_fig, width="stretch", key="issue_probability_distribution")
 
-    prediction_fig = px.histogram(
-        pipeline_predictions,
-        x="issue_probability_pct",
-        nbins=20,
-        title="Predicted Issue Probability Distribution",
-        labels={
-            "issue_probability_pct": "Predicted Issue Probability %"
-        }
-    )
+        st.dataframe(
+            safe_sort(pipeline_predictions, "issue_probability_pct", False),
+            width="stretch",
+            hide_index=True,
+        )
 
-    st.plotly_chart(
-        prediction_fig,
-        use_container_width=True,
-        key="issue_probability_distribution"
-    )
-
-    st.dataframe(
-        pipeline_predictions.sort_values(
-            "issue_probability_pct",
-            ascending=False
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # -----------------------------
-    # Model performance
-    # -----------------------------
     st.markdown("### Latest Model Performance")
-
     if model_performance.empty:
         st.warning("No model performance records found.")
     else:
-        st.dataframe(
-            model_performance,
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(model_performance, width="stretch", hide_index=True)
 
         model_row = model_performance.iloc[0]
-
         perf_col1, perf_col2, perf_col3, perf_col4, perf_col5 = st.columns(5)
 
         with perf_col1:
@@ -888,13 +818,8 @@ with pipeline_health_tab:
             st.metric("ROC-AUC", round(model_row["roc_auc"], 3))
 
 
-
-#----------------------
-#About this project
-#----------------------
 with about_tab:
     st.subheader("About This Project")
-
     st.markdown(
         """
         This dashboard is part of a self-hosted finance and economics data pipeline.
@@ -918,10 +843,8 @@ with about_tab:
         - Latest price summary
         - Monthly returns
         - Risk and volatility analysis
-        - Category and ticker filters
-
-        **Next planned feature:**
-
-        Add macroeconomic indicators and compare them against market performance.
+        - Macroeconomic indicators
+        - Market and macro comparison
+        - Pipeline health monitoring
         """
     )

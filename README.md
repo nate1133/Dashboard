@@ -29,6 +29,7 @@ Python ETL Scripts       Python Macro Loader
                     │
                     ▼
        Local Browser / VS Code / Analysis
+```
 
 
 ## Current Features
@@ -110,11 +111,14 @@ Python ETL Scripts       Python Macro Loader
 Activate the Python environment:
 
 ```bash
+source venv/bin/activate
+```
+
 Run manually:
 
 ```bash
-source venv/bin/activate
 python3 -m streamlit run app/dashboard.py --server.address 0.0.0.0 --server.port 8501
+```
 
 
 ## Project Structure
@@ -141,13 +145,11 @@ finance-econ-pipeline/
 ├── .gitignore
 ├── README.md
 └── requirements.txt
+```
 
 
 ---
 
-## 4. Current Status section
-
-```markdown
 ## Current Status
 
 Version 1 is complete.

@@ -1,32 +1,25 @@
 from pathlib import Path
-import os
+import sys
 
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH = PROJECT_ROOT / ".env"
 TICKER_CONFIG_PATH = PROJECT_ROOT / "config" / "tickers.csv"
 
-load_dotenv(ENV_PATH)
+sys.path.insert(0, str(PROJECT_ROOT))
 
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+from app.db import create_db_engine, load_database_settings
 
 print("Database settings loaded:")
-print(f"DB_USER={DB_USER}")
-print(f"DB_HOST={DB_HOST}")
-print(f"DB_PORT={DB_PORT}")
-print(f"DB_NAME={DB_NAME}")
+db_settings = load_database_settings()
+print(f"DB_USER={db_settings['DB_USER']}")
+print(f"DB_HOST={db_settings['DB_HOST']}")
+print(f"DB_PORT={db_settings['DB_PORT']}")
+print(f"DB_NAME={db_settings['DB_NAME']}")
 
-engine = create_engine(
-    f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+engine = create_db_engine()
 
 def get_tickers():
     tickers_df = pd.read_csv(TICKER_CONFIG_PATH)

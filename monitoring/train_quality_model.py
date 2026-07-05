@@ -1,10 +1,9 @@
 from pathlib import Path
-import os
+import sys
 
 import joblib
 import pandas as pd
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
@@ -24,21 +23,14 @@ from sklearn.preprocessing import OneHotEncoder
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH = PROJECT_ROOT / ".env"
 MODEL_DIR = PROJECT_ROOT / "models"
 MODEL_PATH = MODEL_DIR / "data_quality_issue_model.pkl"
 
-load_dotenv(ENV_PATH)
+sys.path.insert(0, str(PROJECT_ROOT))
 
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+from app.db import create_db_engine
 
-engine = create_engine(
-    f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+engine = create_db_engine()
 
 
 def load_training_data() -> pd.DataFrame:
@@ -90,6 +82,17 @@ def train_model(df: pd.DataFrame):
 
     X = df[feature_cols]
     y = df[target]
+
+    class_counts = y.value_counts()
+    if len(class_counts) < 2:
+        raise ValueError(
+            "Training data must contain both healthy and issue runs before a classifier can be trained."
+        )
+
+    if class_counts.min() < 2:
+        raise ValueError(
+            "Training data needs at least two rows in each issue_flag class for stratified splitting."
+        )
 
     categorical_features = [
         "pipeline_name",
@@ -246,10 +249,11 @@ def main() -> None:
     df = load_training_data()
 
     print(f"Loaded {len(df)} rows.")
-    print(df["issue_flag"].value_counts())
 
     if df.empty:
         raise ValueError("No training data found.")
+
+    print(df["issue_flag"].value_counts())
 
     model, metrics = train_model(df)
     save_model(model)
