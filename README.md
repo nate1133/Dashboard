@@ -56,21 +56,6 @@ Python ETL Scripts       Python Macro Loader
 - Dashboard runs as a background `systemd` service
 - Scheduled ETL jobs using cron
 
-## Trading Intelligence MVP
-
-This repo also includes a separate paper-trading research app in `trading_platform/`.
-
-It supports stock research, rule-based bullish momentum signals, backtesting, SQLite-backed paper trades, risk checks, and audit logs. It does not support live trading.
-
-Run it with:
-
-```bash
-source venv/bin/activate
-python trading_platform/run_app.py
-```
-
-Then open `http://localhost:8503`.
-
 ## Tech Stack
 
 - Ubuntu Server 22.04.5 LTS
